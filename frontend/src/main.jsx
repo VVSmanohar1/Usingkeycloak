@@ -4,44 +4,28 @@ import './index.css'
 
 const API_URL = 'http://localhost:3000'
 
-// Initialize Keycloak
-let keycloak = null
-
-const initKeycloak = async () => {
-  const script = document.createElement('script')
-  script.src = 'http://localhost:8080/js/keycloak.js'
-  script.onload = () => {
-    window.Keycloak({ url: 'http://localhost:8080', realm: 'master', clientId: 'vite-app' }).init({ onLoad: 'check-sso' })
-  }
-  document.body.appendChild(script)
-}
-
 function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [isLogin, setIsLogin] = useState(true)
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError('')
+  useEffect(() => {
+    // Handle Keycloak callback redirect
+    const urlParams = new URLSearchParams(window.location.search)
+    const code = urlParams.get('code')
 
+    if (code) handleKeycloakCallback(code)
+  }, [])
+
+  const handleKeycloakCallback = async (code) => {
     try {
-      const endpoint = isLogin ? '/auth/login' : '/auth/register'
-      const payload = isLogin 
-        ? { email, password }
-        : { email, password, firstName, lastName }
-
-      const response = await fetch(`${API_URL}${endpoint}`, {
+      setLoading(true)
+      const response = await fetch(`${API_URL}/auth/keycloak-callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ code }),
       })
 
       const data = await response.json()
-
       if (response.ok) {
         localStorage.setItem('token', data.token)
         localStorage.setItem('user', JSON.stringify(data.user))
@@ -51,78 +35,38 @@ function LoginPage() {
       }
     } catch (err) {
       setError(err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const handleKeycloakLogin = async () => {
+  const handleKeycloakLogin = async (isRegister = false) => {
     try {
-      const response = await fetch(`${API_URL}/auth/keycloak-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
+      setLoading(true)
+      const endpoint = isRegister ? 'keycloak-register' : 'keycloak-login'
+      const response = await fetch(`${API_URL}/auth/${endpoint}`, { method: 'POST' })
       const data = await response.json()
       window.location.href = data.authUrl
     } catch (err) {
-      setError('Keycloak login failed')
+      setError('Failed to redirect to Keycloak')
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
     <div className="container">
       <div className="auth-form">
-        <h1>{isLogin ? 'Login' : 'Register'}</h1>
-        
+        <h1>Welcome</h1>
         {error && <div className="error">{error}</div>}
-        
-        <form onSubmit={handleSubmit}>
-          {!isLogin && (
-            <>
-              <input
-                type="text"
-                placeholder="First Name"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                required
-              />
-              <input
-                type="text"
-                placeholder="Last Name"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                required
-              />
-            </>
-          )}
-          
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          
-          <button type="submit">{isLogin ? 'Login' : 'Register'}</button>
-        </form>
 
-        <button className="keycloak-btn" onClick={handleKeycloakLogin}>
-          {isLogin ? 'Login' : 'Register'} with Keycloak
+        <button className="keycloak-btn" onClick={() => handleKeycloakLogin(false)} disabled={loading}>
+          {loading ? 'Redirecting...' : 'Login with Keycloak'}
         </button>
 
-        <p>
-          {isLogin ? "Don't have an account? " : 'Already have an account? '}
-          <a onClick={() => setIsLogin(!isLogin)}>
-            {isLogin ? 'Register' : 'Login'}
-          </a>
-        </p>
+        <button className="keycloak-btn register-btn" onClick={() => handleKeycloakLogin(true)} disabled={loading}>
+          {loading ? 'Redirecting...' : 'Register with Keycloak'}
+        </button>
       </div>
     </div>
   )
@@ -151,6 +95,7 @@ function Dashboard() {
       <div className="dashboard">
         <h1>Welcome, {user?.firstName || user?.email}!</h1>
         <p>Email: {user?.email}</p>
+        {user?.firstName && <p>Name: {user.firstName} {user.lastName || ''}</p>}
         <button onClick={handleLogout} className="logout-btn">Logout</button>
       </div>
     </div>
@@ -159,11 +104,15 @@ function Dashboard() {
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
     setIsLoggedIn(!!token)
+    setLoading(false)
   }, [])
+
+  if (loading) return <div className="container"><p>Loading...</p></div>
 
   return isLoggedIn ? <Dashboard /> : <LoginPage />
 }
